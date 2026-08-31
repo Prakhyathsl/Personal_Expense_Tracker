@@ -1,37 +1,31 @@
 const $ = id => document.getElementById(id);
 const money = v => '₹' + Number(v || 0).toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 2});
 
-let pendingRequests = 0;
-let dataRevision = 0;
-let loadingTimer = null;
+let mutationInProgress = false;
 
-function setLoading(show, message = 'Loading your data…') {
+function setLoading(show, message = 'Please wait…') {
     const overlay = $('loadingOverlay');
     if (!overlay) return;
-    if (show) {
-        overlay.querySelector('.loading-text').textContent = message;
-        overlay.classList.add('visible');
-    } else if (pendingRequests === 0) {
-        overlay.classList.remove('visible');
-    }
+    const text = overlay.querySelector('.loading-text');
+    if (text) text.textContent = message;
+    overlay.classList.toggle('visible', !!show);
+    overlay.setAttribute('aria-busy', show ? 'true' : 'false');
 }
 
-function beginLoading(message) {
-    pendingRequests += 1;
-    clearTimeout(loadingTimer);
+function beginMutation(message) {
+    mutationInProgress = true;
     setLoading(true, message);
 }
 
-function endLoading() {
-    pendingRequests = Math.max(0, pendingRequests - 1);
-    if (pendingRequests === 0) {
-        loadingTimer = setTimeout(() => setLoading(false), 120);
-    }
+function endMutation() {
+    mutationInProgress = false;
+    setLoading(false);
 }
 
-async function api(url, opts = {}, loadingMessage) {
+async function api(url, opts = {}, loadingMessage = null) {
     const method = (opts.method || 'GET').toUpperCase();
-    beginLoading(loadingMessage || (method === 'GET' ? 'Loading your data…' : 'Saving your changes…'));
+    const shouldLoad = Boolean(loadingMessage) || ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+    if (shouldLoad) beginMutation(loadingMessage || 'Saving your changes…');
     try {
         const r = await fetch(url, {
             headers: {'Content-Type': 'application/json', ...(opts.headers || {})},
@@ -42,7 +36,7 @@ async function api(url, opts = {}, loadingMessage) {
         if (!r.ok) throw new Error(d?.error || 'Request failed');
         return d;
     } finally {
-        endLoading();
+        if (shouldLoad) endMutation();
     }
 }
 
@@ -108,7 +102,6 @@ function renderDashboardStats(s) {
 async function loadDashboard(revision = dataRevision) {
     try {
         const s = await api('/api/stats');
-        // Ignore an older GET response that completed after a mutation.
         if (revision !== dataRevision) return;
         renderDashboardStats(s);
     } catch (e) {
@@ -123,9 +116,9 @@ function table(items, recent = false) {
 
 async function loadExpenses(revision = dataRevision) {
     try {
-        const items = await api('/api/expenses');
+        const s = await api('/api/stats');
         if (revision !== dataRevision) return;
-        $('expenseTable').innerHTML = table(items);
+        $('expenseTable').innerHTML = table(s.expenses || []);
     } catch (e) {
         toast(e.message);
     }
@@ -133,16 +126,13 @@ async function loadExpenses(revision = dataRevision) {
 
 async function refreshExpenseViews() {
     const revision = ++dataRevision;
-    // One stats request is enough for dashboard/category/academic data.
-    // The expense list is fetched separately because it contains CRUD rows.
     try {
-        const [stats, expenses] = await Promise.all([
-            api('/api/stats', {}, 'Refreshing your expense data…'),
-            api('/api/expenses', {}, 'Refreshing your expense list…')
-        ]);
+        // /api/stats already calculates everything from the current user's expenses,
+        // including the full expense list. One request avoids stale/competing responses.
+        const stats = await api('/api/stats');
         if (revision !== dataRevision) return;
         renderDashboardStats(stats);
-        $('expenseTable').innerHTML = table(expenses);
+        $('expenseTable').innerHTML = table(stats.expenses || []);
         renderCategoryTotals(stats);
         renderAcademicTotals(stats);
     } catch (e) {
@@ -195,7 +185,7 @@ setSemesters();
 
 window.editExpense = async id => {
     try {
-        const items = await api('/api/expenses', {}, 'Loading expense…');
+        const items = (await api('/api/stats')).expenses || [];
         const x = items.find(i => i.id === id);
         if (!x) return toast('Expense not found.');
         const amount = prompt('Amount (₹)', x.amount);
@@ -231,7 +221,7 @@ $('goalForm').addEventListener('submit', async e => {
         await api('/api/savings/goals', {
             method:'POST',
             body:JSON.stringify({name:$('goalName').value,target_amount:$('targetAmount').value,target_date:$('targetDate').value,description:$('goalDescription').value})
-        }, 'Saving your goal…');
+        }, 'Saving savings goal…');
         e.target.reset();
         await loadSavings();
         toast('Savings goal created.', true);
@@ -346,16 +336,13 @@ $('themeToggle').onclick = () => {
 if (localStorage.theme === 'dark') document.body.classList.add('dark');
 
 async function initializeApp() {
-    setLoading(true, 'Loading your account…');
     try {
-        const stats = await api('/api/stats', {}, 'Loading your account…');
+        const stats = await api('/api/stats');
         renderDashboardStats(stats);
         renderCategoryTotals(stats);
         renderAcademicTotals(stats);
     } catch (e) {
         toast(e.message);
-    } finally {
-        setLoading(false);
     }
 }
 
