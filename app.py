@@ -337,7 +337,7 @@ def api_stats():
     for x in items:
         dt=datetime.strptime(x['date'],'%d-%m-%Y'); monthly[dt.strftime('%Y-%m')]+=x['amount']; category[x['category']]+=x['amount']; payment[x['payment_method']]+=x['amount']; years[x['academic_year']]+=x['amount']; sems[x['semester']]+=x['amount']
     recent=sorted(items,key=lambda x:datetime.strptime(x['date'],'%d-%m-%Y'),reverse=True)[:5]
-    return jsonify({'total_spending':total,'total_expenses':total,'transaction_count':n,'average_expense':round(total/n,2) if n else 0,'highest_expense':max([x['amount'] for x in items],default=0),'monthly_average':round(sum(monthly.values())/len(monthly),2) if monthly else 0,'category_totals':dict(category),'payment_totals':dict(payment),'year_totals':dict(years),'semester_totals':dict(sems),'recent_expenses':recent})
+    return jsonify({'total_spending':total,'total_expenses':total,'transaction_count':n,'average_expense':round(total/n,2) if n else 0,'highest_expense':max([x['amount'] for x in items],default=0),'monthly_average':round(sum(monthly.values())/len(monthly),2) if monthly else 0,'category_totals':dict(category),'payment_totals':dict(payment),'year_totals':dict(years),'semester_totals':dict(sems),'recent_expenses':recent,'expenses':items})
 
 @app.route('/api/categories')
 @login_required
